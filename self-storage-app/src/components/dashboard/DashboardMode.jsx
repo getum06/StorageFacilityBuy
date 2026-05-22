@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Calculator, BarChart3, FileText, ChevronRight } from 'lucide-react'
+import { Calculator, BarChart3, FileText, ChevronRight, Globe } from 'lucide-react'
 import AcquisitionForm from './AcquisitionForm'
 import DashboardMetrics from './DashboardMetrics'
 import RecommendationEngine from './RecommendationEngine'
 import ExportPanel from './ExportPanel'
+import MarketDataModule from './market/MarketDataModule'
 import { mockAcquisition } from '../../data/mockData'
 
 const defaultFormData = {
@@ -41,6 +42,7 @@ const defaultFormData = {
 const tabs = [
   { id: 'form', label: 'Input', icon: Calculator },
   { id: 'metrics', label: 'Analysis', icon: BarChart3 },
+  { id: 'market', label: 'Market Data', icon: Globe },
   { id: 'recommendation', label: 'Decision', icon: ChevronRight },
   { id: 'export', label: 'Export', icon: FileText },
 ]
@@ -164,6 +166,9 @@ export default function DashboardMode() {
           )}
           {activeTab === 'metrics' && (
             <DashboardMetrics formData={formData} metrics={metrics} />
+          )}
+          {activeTab === 'market' && (
+            <MarketDataModule />
           )}
           {activeTab === 'recommendation' && (
             <RecommendationEngine formData={formData} metrics={metrics} />
