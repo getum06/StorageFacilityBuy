@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Search, Loader2, AlertCircle, CheckCircle, Key, Info } from 'lucide-react'
+import { MapPin, Search, Loader2, AlertCircle, CheckCircle, Info } from 'lucide-react'
 import { geocodeAddress, isValidZip } from './CensusAPI'
 
 const RADIUS_OPTIONS = [
@@ -9,8 +9,7 @@ const RADIUS_OPTIONS = [
   { value: 5, label: '5 Miles', desc: 'Extended trade area' },
 ]
 
-export default function TradeAreaInput({ inputs, onInputChange, onFetch, loading, fetchError, lastFetched, apiKey, onApiKeyChange, usingDemo }) {
-  const [showApiKey, setShowApiKey] = useState(false)
+export default function TradeAreaInput({ inputs, onInputChange, onFetch, loading, fetchError, lastFetched, usingDemo }) {
   const [geocoding, setGeocoding] = useState(false)
   const [geocodeError, setGeocodeError] = useState(null)
 
@@ -152,30 +151,10 @@ export default function TradeAreaInput({ inputs, onInputChange, onFetch, loading
         </div>
       </div>
 
-      {/* Census API Key (optional) */}
-      <div className="mb-5">
-        <button
-          onClick={() => setShowApiKey(!showApiKey)}
-          className="flex items-center gap-2 text-xs text-gray-500 dark:text-navy-400 hover:text-navy-700 dark:hover:text-navy-200 transition-colors"
-        >
-          <Key className="w-3.5 h-3.5" />
-          Census API Key (optional — free at census.gov/developers)
-          <span className="text-gray-300 dark:text-navy-600">{showApiKey ? '▲' : '▼'}</span>
-        </button>
-        {showApiKey && (
-          <div className="mt-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={e => onApiKeyChange(e.target.value)}
-              placeholder="Paste your free Census API key here"
-              className="w-full bg-gray-50 dark:bg-navy-900 border border-gray-200 dark:border-navy-600 rounded-lg px-3 py-2 text-navy-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-sage-400 outline-none"
-            />
-            <div className="text-xs text-gray-400 dark:text-navy-500 mt-1">
-              Key is stored only in your browser session. Increases rate limit from 500 to unlimited requests/day.
-            </div>
-          </div>
-        )}
+      {/* Data source note */}
+      <div className="mb-5 p-3 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-lg text-xs text-blue-700 dark:text-blue-300">
+        <strong>Data source:</strong> U.S. Census ACS 5-Year via CensusReporter.org — no API key required.
+        Population growth must be entered manually in "Additional Inputs" below (source: Census Bureau, CoStar, or local market research).
       </div>
 
       {/* Fetch Button */}
