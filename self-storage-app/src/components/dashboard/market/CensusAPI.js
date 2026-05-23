@@ -1,99 +1,90 @@
-// U.S. Census Bureau ACS 5-Year API — Self-Storage Market Data Fetcher
-// No API key required for basic usage (500 req/day limit without key)
-// Get a free key at: https://api.census.gov/data/key_signup.html
+// Census data via CensusReporter.org public API
+// No API key required. Data source: ACS 5-Year (most recent vintage available).
+// Docs: https://api.censusreporter.org
+//
+// The Census Bureau's direct API (api.census.gov) now requires a key for all requests.
+// Census Reporter proxies the same ACS data without authentication.
 
-const ACS_YEAR = '2022'
-const ACS_YEAR_PREV = '2019'
-const ACS_BASE = 'https://api.census.gov/data'
-const ACS_DATASET = 'acs/acs5'
+const CR_BASE = 'https://api.censusreporter.org/1.0/data/show/latest'
 
-// Census ACS variables relevant to self-storage demand analysis
-export const CENSUS_VARIABLES = {
-  B01003_001E: 'totalPopulation',
-  B11001_001E: 'totalHouseholds',
-  B25003_002E: 'ownerOccupied',
-  B25003_003E: 'renterOccupied',
-  B19013_001E: 'medianIncome',
-  B25001_001E: 'totalHousingUnits',
-  // Housing structure type (multifamily proxy)
-  B25024_002E: 'units1DetachedSF',
-  B25024_003E: 'units1AttachedSF',
-  B25024_004E: 'units2',
-  B25024_005E: 'units3to4',
-  B25024_006E: 'units5to9',
-  B25024_007E: 'units10to19',
-  B25024_008E: 'units20to49',
-  B25024_009E: 'units50plus',
-  B25024_010E: 'unitsMobile',
-  // Geographic mobility (recent movers)
-  B07003_001E: 'mobilityUniverse',
-  B07003_004E: 'movedDiffCounty',
-  B07003_007E: 'movedDiffState',
-  // Vehicles available
-  B08201_001E: 'vehicleHouseholds',
-  B08201_002E: 'noVehicle',
-  B08201_003E: 'oneVehicle',
-  B08201_004E: 'twoVehicle',
-  B08201_005E: 'threeVehicle',
-  B08201_006E: 'fourPlusVehicle',
-  // Employment
-  B23025_001E: 'employmentUniverse',
-  B23025_002E: 'inLaborForce',
-  B23025_004E: 'employed',
+// Convert 5-digit ZIP to Census Reporter geo_id format
+function zipToGeoId(zip) {
+  return `86000US${zip.toString().padStart(5, '0')}`
 }
 
-// Clean a Census returned value (null out suppressed -666666666)
-function cleanVal(v) {
+// Tables to request — covers all self-storage demand indicators
+const TABLES = [
+  'B01003', // Total population
+  'B11001', // Total households
+  'B19013', // Median household income
+  'B25003', // Tenure (owner / renter occupied)
+  'B25001', // Total housing units
+  'B25024', // Units in structure (multifamily proxy)
+  'B07013', // Geographic mobility by householder tenure (movers in past year)
+  'B08201', // Vehicles available per household
+  'B23025', // Employment status
+].join(',')
+
+// Variable → friendly name map (Census Reporter returns flat variable codes)
+const VAR_MAP = {
+  // Population & Households
+  B01003001: 'totalPopulation',
+  B11001001: 'totalHouseholds',
+  // Tenure
+  B25003001: 'totalOccupied',
+  B25003002: 'ownerOccupied',
+  B25003003: 'renterOccupied',
+  // Income
+  B19013001: 'medianIncome',
+  // Housing units
+  B25001001: 'totalHousingUnits',
+  // Units by structure type (multifamily proxy)
+  B25024001: 'housingUnitsTotal',
+  B25024002: 'units1DetachedSF',
+  B25024003: 'units1AttachedSF',
+  B25024004: 'units2',
+  B25024005: 'units3to4',
+  B25024006: 'units5to9',
+  B25024007: 'units10to19',
+  B25024008: 'units20to49',
+  B25024009: 'units50plus',
+  // Geographic mobility (B07013 structure: 001=total, 004=same house, rest=movers)
+  B07013001: 'mobilityHouseholders',   // Total householders
+  B07013004: 'samHouseHH',             // Same house 1 year ago (did NOT move)
+  B07013007: 'movedWithinCounty',
+  B07013010: 'movedDiffCounty',
+  B07013013: 'movedDiffState',
+  B07013016: 'movedFromAbroad',
+  // Vehicles available (B08201: 001=total, 002=0 vehicles, 003=1, 004=2, 005=3, 006=4+)
+  B08201001: 'vehicleHouseholds',
+  B08201002: 'noVehicle',
+  B08201003: 'oneVehicle',
+  B08201004: 'twoVehicle',
+  B08201005: 'threeVehicle',
+  B08201006: 'fourPlusVehicle',
+  // Employment
+  B23025001: 'employmentUniverse',
+  B23025002: 'inLaborForce',
+  B23025004: 'employed',
+}
+
+function cleanNum(v) {
   const n = parseFloat(v)
   return isNaN(n) || n < 0 ? null : n
 }
 
-// Parse flat array response from Census API into named object
-function parseResponse(headers, values) {
-  const result = {}
-  headers.forEach((h, i) => {
-    result[h] = cleanVal(values[i]) ?? values[i]
-  })
-  return result
-}
-
-// Map raw Census keys → friendly names
-function mapVariables(raw) {
-  const out = {}
-  Object.entries(CENSUS_VARIABLES).forEach(([key, name]) => {
-    out[name] = raw[key] ?? null
-  })
-  return out
-}
-
-// Fetch ACS data for a given ZIP code and year
-async function fetchACSByZip(zip, year = ACS_YEAR, apiKey = '') {
-  const paddedZip = zip.toString().padStart(5, '0')
-  const vars = ['NAME', ...Object.keys(CENSUS_VARIABLES)].join(',')
-  const keyParam = apiKey ? `&key=${apiKey}` : ''
-  const url = `${ACS_BASE}/${year}/${ACS_DATASET}?get=${vars}&for=zip%20code%20tabulation%20area:${paddedZip}${keyParam}`
-
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Census API returned ${res.status} for ZIP ${paddedZip}`)
-  const data = await res.json()
-  if (!Array.isArray(data) || data.length < 2) throw new Error('No Census data found for this ZIP code')
-
-  const raw = parseResponse(data[0], data[1])
-  return mapVariables(raw)
-}
-
-// Geocode an address using the Census Geocoder (free, no key)
+// Geocode address → lat/lng via OpenStreetMap Nominatim (free, no key)
 export async function geocodeAddress(address, city, state, zip) {
   const query = [address, city, state, zip].filter(Boolean).join(' ')
   const encoded = encodeURIComponent(query + ', USA')
   const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1&countrycodes=us`
 
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'StorageIQ-DashboardApp/1.0' }
+    headers: { 'User-Agent': 'StorageIQ/1.0 (self-storage acquisition dashboard)' }
   })
   if (!res.ok) throw new Error('Geocoding service unavailable')
   const data = await res.json()
-  if (!data.length) throw new Error('Address not found — try entering ZIP code only')
+  if (!data.length) throw new Error('Address not found — try entering just the ZIP code')
 
   return {
     lat: parseFloat(data[0].lat),
@@ -102,60 +93,72 @@ export async function geocodeAddress(address, city, state, zip) {
   }
 }
 
-// Main fetch function — gets both current and prior year ACS, computes growth
-export async function fetchMarketData(zip, apiKey = '') {
-  const [current, previous] = await Promise.all([
-    fetchACSByZip(zip, ACS_YEAR, apiKey),
-    fetchACSByZip(zip, ACS_YEAR_PREV, apiKey).catch(() => null),
-  ])
+// Main export: fetch all ACS demographic data for a given ZIP
+export async function fetchMarketData(zip) {
+  const geoId = zipToGeoId(zip)
+  const url = `${CR_BASE}?table_ids=${TABLES}&geo_ids=${geoId}`
 
-  // Compute 3-year CAGR for population and households
-  const years = 3 // 2022 vs 2019
-  let populationGrowthPct = null
-  let householdGrowthPct = null
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Census Reporter returned ${res.status}. Check that ZIP ${zip} is a residential ZIP code.`)
 
-  if (previous && current.totalPopulation && previous.totalPopulation) {
-    populationGrowthPct = ((Math.pow(current.totalPopulation / previous.totalPopulation, 1 / years) - 1) * 100)
-  }
-  if (previous && current.totalHouseholds && previous.totalHouseholds) {
-    householdGrowthPct = ((Math.pow(current.totalHouseholds / previous.totalHouseholds, 1 / years) - 1) * 100)
-  }
+  const json = await res.json()
+  if (json.error) throw new Error(`Census Reporter: ${json.error}`)
+  if (!json.data?.[geoId]) throw new Error(`No ACS data found for ZIP ${zip}. Try a nearby ZIP or enter data manually.`)
 
-  // Derived metrics
-  const renterOccupied = current.renterOccupied ?? 0
-  const ownerOccupied = current.ownerOccupied ?? 0
-  const totalOccupied = renterOccupied + ownerOccupied
-  const renterPct = totalOccupied > 0 ? (renterOccupied / totalOccupied) * 100 : null
+  const tables = json.data[geoId]
+  const release = json.release?.name ?? 'ACS 5-Year'
 
-  const totalHousingUnits = current.totalHousingUnits ?? 0
-  const multifamilyUnits =
-    (current.units5to9 ?? 0) + (current.units10to19 ?? 0) +
-    (current.units20to49 ?? 0) + (current.units50plus ?? 0)
-  const multifamilyPct = totalHousingUnits > 0 ? (multifamilyUnits / totalHousingUnits) * 100 : null
+  // Flatten all table estimates into a single object keyed by variable code
+  const flat = {}
+  Object.values(tables).forEach(table => {
+    Object.entries(table.estimate ?? {}).forEach(([k, v]) => {
+      flat[k] = cleanNum(v)
+    })
+  })
 
-  const singleFamilyPct = totalHousingUnits > 0
-    ? (((current.units1DetachedSF ?? 0) + (current.units1AttachedSF ?? 0)) / totalHousingUnits) * 100
-    : null
+  // Map to friendly names
+  const raw = {}
+  Object.entries(VAR_MAP).forEach(([code, name]) => {
+    raw[name] = flat[code] ?? null
+  })
 
-  const movers = (current.movedDiffCounty ?? 0) + (current.movedDiffState ?? 0)
-  const mobilityUniverse = current.mobilityUniverse ?? 0
-  const mobilityPct = mobilityUniverse > 0 ? (movers / mobilityUniverse) * 100 : null
+  // ── Derived metrics ────────────────────────────────────────────────────────
 
-  const vehicleHouseholds = current.vehicleHouseholds ?? 1
-  const noVehiclePct = vehicleHouseholds > 0
-    ? ((current.noVehicle ?? 0) / vehicleHouseholds) * 100 : null
-  const multiVehiclePct = vehicleHouseholds > 0
-    ? (((current.threeVehicle ?? 0) + (current.fourPlusVehicle ?? 0)) / vehicleHouseholds) * 100 : null
+  // Renter %
+  const totalOccupied = (raw.ownerOccupied ?? 0) + (raw.renterOccupied ?? 0)
+  const renterPct = totalOccupied > 0 ? (raw.renterOccupied / totalOccupied) * 100 : null
 
-  const employmentRate = current.employmentUniverse > 0
-    ? (current.employed / current.employmentUniverse) * 100 : null
+  // Multifamily % (5+ unit structures)
+  const hu = raw.totalHousingUnits ?? 1
+  const multifamilyUnits = (raw.units5to9 ?? 0) + (raw.units10to19 ?? 0) +
+    (raw.units20to49 ?? 0) + (raw.units50plus ?? 0)
+  const multifamilyPct = hu > 0 ? (multifamilyUnits / hu) * 100 : null
+  const singleFamilyPct = hu > 0
+    ? (((raw.units1DetachedSF ?? 0) + (raw.units1AttachedSF ?? 0)) / hu) * 100 : null
+
+  // Household mobility: % of householders who moved in past year
+  // B07013: total(001) - same house(004) = movers
+  const totalMobilityHH = raw.mobilityHouseholders ?? 0
+  const sameHouseHH = raw.samHouseHH ?? 0
+  const movedHH = totalMobilityHH - sameHouseHH
+  const mobilityPct = totalMobilityHH > 0 ? (movedHH / totalMobilityHH) * 100 : null
+
+  // Vehicle ownership
+  const vehHH = raw.vehicleHouseholds ?? 1
+  const noVehiclePct = vehHH > 0 ? ((raw.noVehicle ?? 0) / vehHH) * 100 : null
+  const multiVehiclePct = vehHH > 0
+    ? (((raw.threeVehicle ?? 0) + (raw.fourPlusVehicle ?? 0)) / vehHH) * 100 : null
 
   return {
     zip,
-    year: ACS_YEAR,
-    raw: current,
-    populationGrowthPct,
-    householdGrowthPct,
+    release,
+    geoId,
+    // Key figures
+    totalPopulation: raw.totalPopulation,
+    totalHouseholds: raw.totalHouseholds,
+    medianIncome: raw.medianIncome,
+    totalHousingUnits: raw.totalHousingUnits,
+    // Derived
     renterPct,
     multifamilyPct,
     singleFamilyPct,
@@ -163,16 +166,14 @@ export async function fetchMarketData(zip, apiKey = '') {
     mobilityPct,
     noVehiclePct,
     multiVehiclePct,
-    employmentRate,
-    // Pass through key raw values with friendlier names
-    totalPopulation: current.totalPopulation,
-    totalHouseholds: current.totalHouseholds,
-    medianIncome: current.medianIncome,
-    totalHousingUnits,
+    // Growth: Census Reporter only serves latest vintage — must be entered manually
+    populationGrowthPct: null,
+    householdGrowthPct: null,
+    // Raw for debugging
+    _raw: raw,
   }
 }
 
-// Validate a ZIP code format
 export function isValidZip(zip) {
   return /^\d{5}$/.test(zip?.toString()?.trim())
 }

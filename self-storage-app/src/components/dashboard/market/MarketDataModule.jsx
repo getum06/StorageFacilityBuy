@@ -48,7 +48,6 @@ const DFW_COMPETITORS = [
 
 export default function MarketDataModule() {
   const [inputs, setInputs] = useState(DFW_DEMO)
-  const [apiKey, setApiKey] = useState('')
   const [censusData, setCensusData] = useState(null)
   const [overrides, setOverrides] = useState(DFW_ESTIMATED)
   const [competitors, setCompetitors] = useState(DFW_COMPETITORS)
@@ -68,7 +67,7 @@ export default function MarketDataModule() {
     setLoading(true)
     setFetchError(null)
     try {
-      const data = await fetchMarketData(inputs.zip, apiKey)
+      const data = await fetchMarketData(inputs.zip)
       setCensusData(data)
       setOverrides({}) // clear manual overrides once real data is loaded
       setUsingDemo(false)
@@ -167,8 +166,6 @@ export default function MarketDataModule() {
         fetchError={fetchError}
         lastFetched={lastFetched}
         usingDemo={usingDemo}
-        apiKey={apiKey}
-        onApiKeyChange={setApiKey}
       />
 
       {/* Score & Charts (show after data available) */}
